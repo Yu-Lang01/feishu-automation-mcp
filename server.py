@@ -439,6 +439,25 @@ TOOLS = [
          "table_id": {"type": "string"}, "field_id": {"type": "string"},
          "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message", "table_id"]}},
+
+    {"name": "create_set_record_notify", "description": "新增记录时自动修改字段值（如设置状态为'已发送'）",
+     "inputSchema": {"type": "object", "properties": {
+         "app_token": {"type": "string"}, "title": {"type": "string"},
+         "table_id": {"type": "string"}, "field_id": {"type": "string"},
+         "new_value": {"description": "要设置的新值"},
+         "receivers": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["app_token", "title", "table_id", "field_id", "new_value"]}},
+
+    {"name": "create_condition_set_record", "description": "记录满足条件时自动修改字段值（如'发送'→改为'已发送'）",
+     "inputSchema": {"type": "object", "properties": {
+         "app_token": {"type": "string"}, "title": {"type": "string"},
+         "table_id": {"type": "string"},
+         "trigger_field_id": {"type": "string", "description": "触发条件的字段ID"},
+         "trigger_value": {"description": "触发条件的字段值"},
+         "set_field_id": {"type": "string", "description": "要修改的字段ID"},
+         "set_value": {"description": "修改为的值"},
+         "receivers": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["app_token", "title", "table_id", "trigger_field_id", "trigger_value", "set_field_id", "set_value"]}},
 ]
 
 class MCPHandler(BaseHTTPRequestHandler):
@@ -488,6 +507,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "create_lark_message_trigger": r = tool_create_lark_message_trigger(args["app_token"], args["title"], args["message"], args.get("scope", "at"), args.get("receivers"))
             elif name == "create_form_notify": r = tool_create_form_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
             elif name == "create_button_notify": r = tool_create_button_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
+            elif name == "create_set_record_notify": r = tool_create_set_record_notify(args["app_token"], args["title"], args["table_id"], args["field_id"], args["new_value"], args.get("trigger_field_id"), args.get("trigger_value"), args.get("receivers"))
+            elif name == "create_condition_set_record": r = tool_create_condition_set_record(args["app_token"], args["title"], args["table_id"], args["trigger_field_id"], args["trigger_value"], args["set_field_id"], args["set_value"], args.get("receivers"))
             else: return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
             return {"content": [{"type": "text", "text": json.dumps(r, ensure_ascii=False, indent=2)}]}
         except Exception as e:
@@ -559,3 +580,24 @@ def tool_create_button_notify(app_token, title, message, table_id, field_id=None
     act, _ = build_lark_message_action(table_id, message, "red", receivers)
     draft = build_draft(title, trig, [act])
     return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id, [field_id] if field_id else None))
+
+# ========== SetRecordAction 快捷工具 ==========
+
+def tool_create_set_record_notify(app_token, title, table_id, field_id, new_value, trigger_field_id=None, trigger_value=None, receivers=None):
+    """修改记录字段值（可配合其他触发器使用）"""
+    trig, trig_name, trig_id = build_set_record_trigger(table_id)
+    act, _ = build_set_record_action(table_id, trig_id)
+    # 设置要修改的字段值
+    ref_field = make_ref_field_id(table_id, field_id)
+    act["data"]["values"] = [{"fieldId": ref_field, "valueType": "value", "value": new_value}]
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id, [field_id]))
+
+def tool_create_condition_set_record(app_token, title, table_id, trigger_field_id, trigger_value, set_field_id, set_value, receivers=None):
+    """满足条件时修改记录"""
+    trig, trig_name, trig_id = build_change_record_trigger(table_id, trigger_field_id)
+    act, _ = build_set_record_action(table_id, trig_id)
+    ref_field = make_ref_field_id(table_id, set_field_id)
+    act["data"]["values"] = [{"fieldId": ref_field, "valueType": "value", "value": set_value}]
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id, [trigger_field_id, set_field_id]))
