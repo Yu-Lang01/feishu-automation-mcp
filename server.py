@@ -214,25 +214,49 @@ def build_webhook_trigger():
 
 # ========== 动作构建 ==========
 
-def build_lark_message_action(table_id, message, color="purple", receivers=None):
-    """发送飞书消息"""
+def build_lark_message_action(table_id, message, color="purple", receivers=None, buttons=None):
+    """发送飞书消息（支持按钮）"""
     act_id = f"act{rand_id()}"
     persons = []
     if receivers:
         for r in receivers:
             persons.append({"type": "ref", "id": r, "entityId": r, "value": "", "tagType": "user", "owner_type": 0, "department": ""})
     rich_text = [{"type": "paragraph", "lineMarkerList": [], "value": [{"type": "text", "text": message, "extra": {}}]}]
+    
+    # 构建按钮列表
+    btn_list = []
+    if buttons:
+        for btn in buttons:
+            btn_id = f"btn{rand_id(8)}"
+            btn_item = {
+                "id": btn_id,
+                "text": [{"type": "text", "text": btn.get("text", ""), "extra": {}}],
+                "type": btn.get("type", "default"),
+                "behaviors": []
+            }
+            # 按钮行为：打开链接 或 触发回调
+            if btn.get("url"):
+                btn_item["behaviors"].append({"type": "open_url", "default_url": btn["url"]})
+            elif btn.get("trigger_workflow"):
+                btn_item["behaviors"].append({"type": "callback", "value": {"action": btn.get("action", "click"), "workflowId": btn.get("workflow_id", "")}})
+            else:
+                btn_item["behaviors"].append({"type": "callback", "value": {"action": btn.get("action", "click")}})
+            btn_list.append(btn_item)
+    
     return {
         "id": act_id, "type": "LarkMessageAction",
         "data": {
             "notifyIdentity": "mixed", "robotType": "baseApp",
             "persons": persons, "groups": [], "title": [],
-            "titleTemplateColor": color, "content": [], "btnList": [],
-            "needBtn": False, "needTopBase": False, "needCompress": True,
+            "titleTemplateColor": color, "content": [], "btnList": btn_list,
+            "needBtn": len(btn_list) > 0, "needTopBase": False, "needCompress": True,
             "sendMsgScene": "send", "senders": [], "senderType": 4,
             "attachments": [], "contentType": "rich_text",
             "richTextContent": rich_text,
-            "buttonConfig": {"notRepeatClickMode": "AllUser", "mutualExclusion": False}
+            "buttonConfig": {
+                "notRepeatClickMode": "AllUser",
+                "mutualExclusion": len(btn_list) > 1
+            }
         },
         "stepTitle": "", "version": "1.1.0", "next": []
     }, act_id
@@ -338,17 +362,17 @@ def tool_create_workflow(app_token, draft, trigger_name, extra=None):
     }
     return api_call("POST", "/space/api/bitable/automation/create", body)
 
-def tool_create_daily_message(app_token, title, message, table_id=None, hour=10, minute=0, receivers=None):
+def tool_create_daily_message(app_token, title, message, table_id=None, hour=10, minute=0, receivers=None, buttons=None):
     """创建每日定时消息"""
     trig, trig_name, _ = build_timer_trigger(table_id, "DAILY", hour, minute)
-    act, act_id = build_lark_message_action(table_id, message, "purple", receivers)
+    act, act_id = build_lark_message_action(table_id, message, "purple", receivers, buttons)
     draft = build_draft(title, trig, [act])
     return tool_create_workflow(app_token, draft, trig_name)
 
-def tool_create_once_message(app_token, title, message, table_id=None, receivers=None):
+def tool_create_once_message(app_token, title, message, table_id=None, receivers=None, buttons=None):
     """创建一次性消息"""
     trig, trig_name, _ = build_timer_trigger(table_id, "NO_REPEAT")
-    act, act_id = build_lark_message_action(table_id, message, "blue", receivers)
+    act, act_id = build_lark_message_action(table_id, message, "blue", receivers, buttons)
     draft = build_draft(title, trig, [act])
     return tool_create_workflow(app_token, draft, trig_name)
 
@@ -386,17 +410,29 @@ TOOLS = [
     {"name": "list_workflows", "description": "列出飞书多维表格的所有自动化工作流",
      "inputSchema": {"type": "object", "properties": {"app_token": {"type": "string"}}, "required": ["app_token"]}},
 
-    {"name": "create_daily_message", "description": "创建每日定时消息提醒",
+    {"name": "create_daily_message", "description": "创建每日定时消息提醒（支持按钮）",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
          "table_id": {"type": "string"}, "hour": {"type": "integer"}, "minute": {"type": "integer"},
-         "receivers": {"type": "array", "items": {"type": "string"}}
+         "receivers": {"type": "array", "items": {"type": "string"}},
+         "buttons": {"type": "array", "description": "按钮列表", "items": {
+             "type": "object", "properties": {
+                 "text": {"type": "string"}, "type": {"type": "string", "enum": ["default", "primary", "danger"]},
+                 "url": {"type": "string"}, "action": {"type": "string"}
+             }
+         }}
      }, "required": ["app_token", "title", "message"]}},
 
-    {"name": "create_once_message", "description": "创建一次性消息提醒",
+    {"name": "create_once_message", "description": "创建一次性消息提醒（支持按钮）",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
-         "table_id": {"type": "string"}, "receivers": {"type": "array", "items": {"type": "string"}}
+         "table_id": {"type": "string"}, "receivers": {"type": "array", "items": {"type": "string"}},
+         "buttons": {"type": "array", "description": "按钮列表", "items": {
+             "type": "object", "properties": {
+                 "text": {"type": "string"}, "type": {"type": "string", "enum": ["default", "primary", "danger"]},
+                 "url": {"type": "string"}, "action": {"type": "string"}
+             }
+         }}
      }, "required": ["app_token", "title", "message"]}},
 
     {"name": "create_new_record_notify", "description": "新增记录时发送通知",
@@ -499,8 +535,8 @@ class MCPHandler(BaseHTTPRequestHandler):
     def _call_tool(self, name, args):
         try:
             if name == "list_workflows": r = tool_list_workflows(args["app_token"])
-            elif name == "create_daily_message": r = tool_create_daily_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("hour", 10), args.get("minute", 0), args.get("receivers"))
-            elif name == "create_once_message": r = tool_create_once_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("receivers"))
+            elif name == "create_daily_message": r = tool_create_daily_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("hour", 10), args.get("minute", 0), args.get("receivers"), args.get("buttons"))
+            elif name == "create_once_message": r = tool_create_once_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("receivers"), args.get("buttons"))
             elif name == "create_new_record_notify": r = tool_create_new_record_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
             elif name == "create_change_record_notify": r = tool_create_change_record_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
             elif name == "create_time_reminder": r = tool_create_time_reminder(args["app_token"], args["title"], args["message"], args["table_id"], args["field_id"], args.get("hour", 9), args.get("minute", 0), args.get("receivers"))
