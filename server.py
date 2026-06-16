@@ -426,11 +426,6 @@ TOOLS = [
          "scope": {"type": "string", "enum": ["at", "all"], "description": "at=被@时, all=所有消息"},
          "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message"]}},
-    {"name": "create_webhook_notify", "description": "接收到webhook时发送通知",
-     "inputSchema": {"type": "object", "properties": {
-         "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
-         "receivers": {"type": "array", "items": {"type": "string"}}
-     }, "required": ["app_token", "title", "message"]}},
 
     {"name": "create_form_notify", "description": "表单提交时发送通知",
      "inputSchema": {"type": "object", "properties": {
@@ -491,7 +486,6 @@ class MCPHandler(BaseHTTPRequestHandler):
             elif name == "create_change_record_notify": r = tool_create_change_record_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
             elif name == "create_time_reminder": r = tool_create_time_reminder(args["app_token"], args["title"], args["message"], args["table_id"], args["field_id"], args.get("hour", 9), args.get("minute", 0), args.get("receivers"))
             elif name == "create_lark_message_trigger": r = tool_create_lark_message_trigger(args["app_token"], args["title"], args["message"], args.get("scope", "at"), args.get("receivers"))
-            elif name == "create_webhook_notify": r = tool_create_webhook_notify(args["app_token"], args["title"], args["message"], args.get("receivers"))
             elif name == "create_form_notify": r = tool_create_form_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
             elif name == "create_button_notify": r = tool_create_button_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
             else: return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
@@ -550,12 +544,7 @@ def build_button_trigger(table_id, field_id=None):
 
 # ========== 补充的工具 ==========
 
-def tool_create_webhook_notify(app_token, title, message, receivers=None):
-    """接收到webhook时发消息"""
-    trig, trig_name, _ = build_webhook_trigger()
-    act, _ = build_lark_message_action(None, message, "red", receivers)
-    draft = build_draft(title, trig, [act])
-    return tool_create_workflow(app_token, draft, trig_name)
+
 
 def tool_create_form_notify(app_token, title, message, table_id, receivers=None):
     """表单提交时发消息"""
