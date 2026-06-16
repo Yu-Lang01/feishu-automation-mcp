@@ -119,13 +119,20 @@ def build_draft(config):
     elif trig_type == "RecordTrigger":
         trigger_step = {
             "id": trig_id, "type": trig_type,
-            "data": {"tableId": trigger["tableId"], "filter": trigger.get("filter", {})},
+            "data": {
+                "tableId": trigger["tableId"],
+                "filter": trigger.get("filter", {"conjunction": "and", "conditions": []}),
+                "eventType": trigger.get("eventType", "create")
+            },
             "stepTitle": "", "next": []
         }
     elif trig_type == "FormTrigger":
         trigger_step = {
             "id": trig_id, "type": trig_type,
-            "data": {"tableId": trigger["tableId"]},
+            "data": {
+                "tableId": trigger["tableId"],
+                "filter": trigger.get("filter", {"conjunction": "and", "conditions": []})
+            },
             "stepTitle": "", "next": []
         }
     elif trig_type == "ButtonTrigger":
