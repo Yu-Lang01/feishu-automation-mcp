@@ -1,85 +1,47 @@
 ---
 name: feishu-automation-mcp
-version: "0.2.0"
+version: "0.3.0"
 description: >
   飞书多维表格自动化 MCP：通过编程方式创建和管理多维表格的自动化工作流。
-  支持定时消息提醒、记录变化触发等功能。
+  支持定时消息、记录变化、表单提交、按钮点击等触发器，以及发消息、更新记录、发邮件、HTTP请求等动作。
   触发词：自动化工作流、定时提醒、自动通知、工作流管理、自动化MCP、
-  创建提醒、定时消息、记录触发、飞书自动化。
+  创建提醒、定时消息、记录触发、飞书自动化、表单触发、按钮触发。
 ---
 
 # 飞书多维表格自动化 MCP
 
 通过逆向工程的飞书内部 API，实现多维表格自动化工作流的编程管理。
 
-## 能力
+## 支持的触发器
 
-- 📋 列出多维表格的所有自动化工作流
-- ➕ 创建定时消息提醒（每日/每周/一次性）
-- 🔔 创建记录变化触发（当新增/修改记录时触发消息）
-- 🛠️ 通用工作流创建接口
+| 类型 | 说明 |
+|------|------|
+| TimerTrigger | 定时触发（每日/每周/一次性） |
+| RecordTrigger | 记录变化触发 |
+| FormTrigger | 表单提交触发 |
+| ButtonTrigger | 按钮点击触发 |
 
-## 前置条件
+## 支持的动作
 
-### 环境变量
+| 类型 | 说明 |
+|------|------|
+| LarkMessageAction | 发送飞书消息 |
+| BitableAction | 更新记录字段 |
+| SendEmailAction | 发送邮件 |
+| HttpAction | HTTP 请求 |
+| WebhookAction | Webhook 回调 |
+| ConditionAction | 条件判断 |
+| BitableAutomationAction | 自动化动作 |
 
-```bash
-export FEISHU_SESSION="你的session值"
-export FEISHU_CSRF_TOKEN="你的csrf_token"
-export FEISHU_PASSPORT_TOKEN="你的passport_app_access_token"
-```
+## 工具（7个）
 
-### 启动 MCP Server
-
-```bash
-python3 /root/.openclaw/skills/feishu-automation-mcp/server.py --port 8067 &
-```
-
-## 工具调用
-
-### 列出工作流
-
-```bash
-curl -X POST http://localhost:8067 -H 'Content-Type: application/json' -d '{
-  "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-  "params": {"name": "list_workflows", "arguments": {"app_token": "多维表格token"}}
-}'
-```
-
-### 创建每日提醒
-
-```bash
-curl -X POST http://localhost:8067 -H 'Content-Type: application/json' -d '{
-  "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-  "params": {"name": "create_daily_message", "arguments": {
-    "app_token": "多维表格token",
-    "title": "每日提醒",
-    "message": "今日待处理任务...",
-    "hour": 10, "minute": 0
-  }}
-}'
-```
-
-### 创建记录触发
-
-```bash
-curl -X POST http://localhost:8067 -H 'Content-Type: application/json' -d '{
-  "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-  "params": {"name": "create_record_trigger", "arguments": {
-    "app_token": "多维表格token",
-    "title": "新记录通知",
-    "message": "有新记录创建",
-    "table_id": "tblxxx"
-  }}
-}'
-```
-
-## ⚠️ 关键踩坑记录
-
-1. **不要传 flowSchema 和 nodeSchema** — 服务器会根据 draft 自动生成，传了会导致 cron 验证失败
-2. **Cookie 会过期** — 需要定期更新环境变量
-3. **删除需要更高权限** — 目前 API 删除返回 403
-4. **不同租户域名不同** — 通过 FEISHU_DOMAIN 环境变量配置
+- `list_workflows` — 列出所有工作流
+- `create_workflow` — 通用创建接口
+- `create_daily_message` — 每日定时提醒
+- `create_once_message` — 一次性提醒
+- `create_record_trigger` — 记录变化触发
+- `create_form_trigger` — 表单提交触发
+- `create_button_trigger` — 按钮点击触发
 
 ## 文件位置
 
