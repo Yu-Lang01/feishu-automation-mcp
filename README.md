@@ -2,7 +2,7 @@
 
 通过逆向工程的飞书内部 API，实现多维表格自动化工作流的编程管理。
 
-## 支持的触发器（8种）
+## 支持的触发器（7种）
 
 | 触发器 | triggerName | 说明 |
 |--------|-------------|------|
@@ -11,7 +11,6 @@
 | ChangeRecordTrigger | `changeRecord` | 记录满足条件触发 |
 | ReminderTrigger | `datetimeField` | 到达记录中的时间触发 |
 | LarkMessageTrigger | `larkMessage` | 接收到飞书消息触发 |
-| WebhookTrigger | `webhook` | 接收到webhook触发 |
 | FormTrigger | `form_submit` | 表单提交触发 |
 | ButtonTrigger | `button_click` | 按钮点击触发 |
 
@@ -30,7 +29,7 @@
 | WebhookAction | Webhook回调 |
 | ConditionAction | 条件判断 |
 
-## 工具列表（10个）
+## 工具列表（9个）
 
 ### list_workflows
 列出多维表格的所有自动化工作流。
@@ -109,17 +108,6 @@
   "title": "消息触发通知",
   "message": "收到新消息",
   "scope": "at",
-  "receivers": ["ou_xxx"]
-}
-```
-
-### create_webhook_notify
-接收到webhook时发送通知。
-```json
-{
-  "app_token": "多维表格token",
-  "title": "Webhook通知",
-  "message": "收到webhook",
   "receivers": ["ou_xxx"]
 }
 ```
@@ -205,4 +193,4 @@ MCP 会自动处理前缀生成和 `extra.TableMap` 映射。
 | 0.1.0 | 2026-06-16 | 初版，验证 API 可行性 |
 | 0.2.0 | 2026-06-16 | 重构为通用 MCP |
 | 0.3.0 | 2026-06-16 | 支持 TimerTrigger + LarkMessageAction |
-| 0.4.0 | 2026-06-16 | 支持全部 8 种触发器 + 10 种动作 + ref_ 前缀系统 |
+| 0.4.0 | 2026-06-16 | 支持全部 7 种触发器 + 9 个工具 + ref_ 前缀系统 |
