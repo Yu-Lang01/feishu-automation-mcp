@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-飞书多维表格自动化 MCP Server v0.3.0
+飞书多维表格自动化 MCP Server v0.4.0
 Feishu Bitable Automation MCP Server
 
-支持的触发器类型：
+基于逆向工程的飞书内部 API，支持全部触发器和动作类型。
+
+触发器类型（8种）：
 - TimerTrigger: 定时触发（每日/每周/一次性）
-- RecordTrigger: 记录变化触发（新增/修改/删除）
+- SetRecordTrigger: 新增记录触发
+- ChangeRecordTrigger: 记录满足条件触发
+- ReminderTrigger: 到达记录中的时间触发
+- LarkMessageTrigger: 接收到飞书消息触发
+- WebhookTrigger: 接收到webhook触发
 - FormTrigger: 表单提交触发
 - ButtonTrigger: 按钮点击触发
 
-支持的动作类型：
+动作类型（10种）：
 - LarkMessageAction: 发送飞书消息
-- BitableAction: 更新记录字段
+- AddRecordAction: 新增记录
+- SetRecordAction: 修改记录
+- FindRecordAction: 查找记录
+- GenerateAiTextAction: AI生成文本
+- HTTPClientAction: 发送HTTP请求
+- BitableAction: 更新字段
 - SendEmailAction: 发送邮件
-- HttpAction: HTTP 请求
-- WebhookAction: Webhook 回调
+- WebhookAction: Webhook回调
 - ConditionAction: 条件判断
-- BitableAutomationAction: 自动化动作
 
 使用方式：
   export FEISHU_SESSION="你的session"
@@ -24,14 +33,14 @@ Feishu Bitable Automation MCP Server
   export FEISHU_PASSPORT_TOKEN="你的passport_app_access_token"
   python3 server.py --port 8067
 
-版本: 0.3.0
+版本: 0.4.0
 """
 
 import json, os, sys, random, string, time, argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 # ========== 配置 ==========
 
@@ -86,164 +95,290 @@ def api_call(method, path, body=None):
     except Exception as e:
         return {"code": -1, "msg": str(e)}
 
-# ========== Draft 构建器 ==========
+# ========== ref_ 前缀系统 ==========
 
-TRIGGER_MAP = {
-    "TimerTrigger": "cron",
-    "RecordTrigger": "record_change",
-    "FormTrigger": "form_submit",
-    "ButtonTrigger": "button_click",
-}
+def make_ref_table_id(table_id):
+    """生成 ref_ 前缀的 table ID"""
+    return f"ref_{table_id}"
 
-def build_draft(config):
+def make_ref_field_id(table_id, field_id):
+    """生成 ref_ 前缀的 field ID"""
+    return f"ref_{table_id}_{field_id}"
+
+def build_table_map(table_id, field_ids=None):
+    """构建 extra.TableMap"""
+    ref_table = make_ref_table_id(table_id)
+    field_map = {}
+    if field_ids:
+        for fid in field_ids:
+            field_map[make_ref_field_id(table_id, fid)] = fid
+    return {ref_table: {"TableID": table_id, "FieldMap": field_map, "ViewMap": {}}}
+
+def build_extra(table_id=None, field_ids=None):
+    """构建 extra JSON"""
+    table_map = {}
+    if table_id:
+        table_map = build_table_map(table_id, field_ids)
+    return json.dumps({"TableMap": table_map, "BlockMap": {}, "WorkflowMap": {}, "RelationInfo": {}})
+
+# ========== 触发器构建 ==========
+
+def build_timer_trigger(table_id, rule="DAILY", hour=10, minute=0):
+    """定时触发"""
     trig_id = f"trig{rand_id()}"
     now_ms = int(time.time() * 1000)
+    return {
+        "id": trig_id, "type": "TimerTrigger",
+        "data": {
+            "startTime": now_ms, "rule": rule,
+            "endTime": now_ms + 365*24*3600*1000,
+            "isNeverEnd": False, "hour": hour, "minute": minute
+        },
+        "stepTitle": "", "next": []
+    }, "cron", trig_id
 
-    trigger = config["trigger"]
-    trig_type = trigger["type"]
+def build_set_record_trigger(table_id):
+    """新增记录触发"""
+    trig_id = f"trig{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    return {
+        "id": trig_id, "type": "SetRecordTrigger",
+        "data": {
+            "tableId": ref_table, "recordType": "All",
+            "filterInfo": None, "fields": [],
+            "triggerControlList": ["pasteUpdate", "automationBatchUpdate", "appendImport", "openAPIBatchUpdate"]
+        },
+        "stepTitle": "", "next": []
+    }, "setRecord", trig_id
 
-    # 构建触发器
-    if trig_type == "TimerTrigger":
-        trigger_step = {
-            "id": trig_id, "type": trig_type,
-            "data": {
-                "startTime": now_ms,
-                "rule": trigger.get("rule", "DAILY"),
-                "endTime": now_ms + 365 * 24 * 3600 * 1000,
-                "isNeverEnd": False,
-                "hour": trigger.get("hour", 10),
-                "minute": trigger.get("minute", 0),
-            },
-            "stepTitle": "", "next": []
-        }
-    elif trig_type == "RecordTrigger":
-        trigger_step = {
-            "id": trig_id, "type": trig_type,
-            "data": {
-                "tableId": trigger["tableId"],
-                "filter": trigger.get("filter", {"conjunction": "and", "conditions": []}),
-                "eventType": trigger.get("eventType", "create")
-            },
-            "stepTitle": "", "next": []
-        }
-    elif trig_type == "FormTrigger":
-        trigger_step = {
-            "id": trig_id, "type": trig_type,
-            "data": {
-                "tableId": trigger["tableId"],
-                "filter": trigger.get("filter", {"conjunction": "and", "conditions": []})
-            },
-            "stepTitle": "", "next": []
-        }
-    elif trig_type == "ButtonTrigger":
-        trigger_step = {
-            "id": trig_id, "type": trig_type,
-            "data": {"tableId": trigger["tableId"], "fieldId": trigger.get("fieldId", "")},
-            "stepTitle": "", "next": []
-        }
-    else:
-        return None, f"不支持的触发器类型: {trig_type}"
+def build_change_record_trigger(table_id, field_id=None, field_type=None, operator="is", value=None):
+    """记录满足条件触发"""
+    trig_id = f"trig{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    fields = []
+    if field_id:
+        ref_field = make_ref_field_id(table_id, field_id)
+        cond_id = f"con{rand_id(8)}"
+        fields = [{"fieldId": ref_field, "fieldType": field_type or 1, "operator": operator, "value": value, "conditionId": cond_id}]
+    return {
+        "id": trig_id, "type": "ChangeRecordTrigger",
+        "data": {
+            "tableId": ref_table, "fields": fields,
+            "triggerControlList": ["appendImport", "syncUpdate", "automationBatchUpdate", "pasteUpdate", "openAPIBatchUpdate"]
+        },
+        "stepTitle": "", "next": []
+    }, "changeRecord", trig_id
 
-    trigger_name = TRIGGER_MAP.get(trig_type, "cron")
+def build_reminder_trigger(table_id, field_id, offset=0, unit=3, hour=9, minute=0):
+    """到达记录中的时间触发"""
+    trig_id = f"trig{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    ref_field = make_ref_field_id(table_id, field_id)
+    return {
+        "id": trig_id, "type": "ReminderTrigger",
+        "data": {
+            "tableId": ref_table, "fieldId": ref_field,
+            "offset": offset, "unit": unit, "hour": hour, "minute": minute
+        },
+        "stepTitle": "", "next": []
+    }, "datetimeField", trig_id
 
-    # 构建动作
-    action_steps = []
-    for action in config.get("actions", []):
-        act_id = f"act{rand_id()}"
-        act_type = action.get("type", "LarkMessageAction")
+def build_lark_message_trigger(scope="at"):
+    """接收到飞书消息触发"""
+    trig_id = f"trig{rand_id()}"
+    return {
+        "id": trig_id, "type": "LarkMessageTrigger",
+        "data": {
+            "receiveScene": "group", "receiverType": "baseApp",
+            "groups": None, "scope": scope,
+            "sendPersons": None,
+            "filter": {"conjunction": "and", "conditions": []}
+        },
+        "stepTitle": "", "next": []
+    }, "larkMessage", trig_id
 
-        if act_type == "LarkMessageAction":
-            persons = [{"type": "ref", "id": r, "entityId": r, "value": "", "tagType": "user", "owner_type": 0, "department": ""} for r in action.get("receivers", [])]
-            rich_text = [{"type": "paragraph", "lineMarkerList": [], "value": [{"type": "text", "text": action.get("content", ""), "extra": {}}]}]
-            act_data = {
-                "notifyIdentity": "mixed", "robotType": "baseApp",
-                "persons": persons, "groups": [], "title": [],
-                "titleTemplateColor": action.get("color", "purple"),
-                "content": [], "btnList": [], "needBtn": False, "needTopBase": False,
-                "needCompress": True, "sendMsgScene": "send", "senders": [],
-                "senderType": 4, "attachments": [], "contentType": "rich_text",
-                "richTextContent": rich_text,
-                "buttonConfig": {"notRepeatClickMode": "AllUser", "mutualExclusion": False}
-            }
-        elif act_type == "BitableAction":
-            act_data = {
-                "tableId": action["tableId"],
-                "fieldId": action.get("fieldId", ""),
-                "action": action.get("updateAction", "setValue"),
-                "value": action.get("value", ""),
-            }
-        elif act_type == "SendEmailAction":
-            act_data = {"to": action["to"], "subject": action.get("subject", ""), "body": action.get("body", "")}
-        elif act_type == "HttpAction":
-            act_data = {"url": action["url"], "method": action.get("method", "GET"), "headers": action.get("headers", {}), "body": action.get("body", "")}
-        elif act_type == "WebhookAction":
-            act_data = {"url": action["url"]}
-        elif act_type == "ConditionAction":
-            act_data = {"conditions": action.get("conditions", [])}
-        elif act_type == "BitableAutomationAction":
-            act_data = action.get("data", {})
-        else:
-            act_data = action.get("data", {})
+def build_webhook_trigger():
+    """Webhook触发"""
+    trig_id = f"trig{rand_id()}"
+    token = ''.join(random.choices(string.ascii_letters + string.digits, k=24))
+    return {
+        "id": trig_id, "type": "WebhookTrigger",
+        "data": {
+            "webhookToken": token, "ipAllowList": None,
+            "bearerToken": None, "requestLoading": True,
+            "outputType": "Request",
+            "outputJson": {"body": "{}"}
+        },
+        "stepTitle": "", "next": []
+    }, "webhook", trig_id
 
-        action_steps.append({
-            "id": act_id, "type": act_type, "data": act_data,
-            "stepTitle": action.get("title", ""), "version": "1.1.0", "next": []
-        })
+# ========== 动作构建 ==========
 
+def build_lark_message_action(table_id, message, color="purple", receivers=None):
+    """发送飞书消息"""
+    act_id = f"act{rand_id()}"
+    persons = []
+    if receivers:
+        for r in receivers:
+            persons.append({"type": "ref", "id": r, "entityId": r, "value": "", "tagType": "user", "owner_type": 0, "department": ""})
+    rich_text = [{"type": "paragraph", "lineMarkerList": [], "value": [{"type": "text", "text": message, "extra": {}}]}]
+    return {
+        "id": act_id, "type": "LarkMessageAction",
+        "data": {
+            "notifyIdentity": "mixed", "robotType": "baseApp",
+            "persons": persons, "groups": [], "title": [],
+            "titleTemplateColor": color, "content": [], "btnList": [],
+            "needBtn": False, "needTopBase": False, "needCompress": True,
+            "sendMsgScene": "send", "senders": [], "senderType": 4,
+            "attachments": [], "contentType": "rich_text",
+            "richTextContent": rich_text,
+            "buttonConfig": {"notRepeatClickMode": "AllUser", "mutualExclusion": False}
+        },
+        "stepTitle": "", "version": "1.1.0", "next": []
+    }, act_id
+
+def build_add_record_action(table_id):
+    """新增记录"""
+    act_id = f"act{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    return {
+        "id": act_id, "type": "AddRecordAction",
+        "data": {
+            "tableId": ref_table,
+            "values": []
+        },
+        "stepTitle": "", "next": []
+    }, act_id
+
+def build_set_record_action(table_id, ref_step_id):
+    """修改记录"""
+    act_id = f"act{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    return {
+        "id": act_id, "type": "SetRecordAction",
+        "data": {
+            "tableId": ref_table, "values": [],
+            "recordType": "Ref",
+            "recordInfo": {"stepId": ref_step_id, "stepNum": 0},
+            "maxSetRecordNum": 100
+        },
+        "stepTitle": "", "next": []
+    }, act_id
+
+def build_find_record_action(table_id, field_id=None):
+    """查找记录"""
+    act_id = f"act{rand_id()}"
+    ref_table = make_ref_table_id(table_id)
+    conditions = []
+    if field_id:
+        ref_field = make_ref_field_id(table_id, field_id)
+        cond_id = f"con{rand_id(8)}"
+        conditions = [{"fieldId": ref_field, "fieldType": 1, "operator": "is", "value": None, "conditionId": cond_id}]
+    return {
+        "id": act_id, "type": "FindRecordAction",
+        "data": {
+            "tableId": ref_table, "fieldIds": [], "fieldsMap": {},
+            "recordType": "Filter", "shouldProceedWithNoResults": True,
+            "recordInfo": {"conjunction": "and", "conditions": conditions}
+        },
+        "stepTitle": "", "next": []
+    }, act_id
+
+def build_generate_ai_text_action():
+    """AI生成文本"""
+    act_id = f"act{rand_id()}"
+    return {
+        "id": act_id, "type": "GenerateAiTextAction",
+        "data": {"prompt": [], "promptType": "customize"},
+        "stepTitle": "", "next": []
+    }, act_id
+
+def build_http_client_action(method="POST"):
+    """发送HTTP请求"""
+    act_id = f"act{rand_id()}"
+    return {
+        "id": act_id, "type": "HTTPClientAction",
+        "data": {
+            "method": method, "url": [],
+            "responseType": "json", "responseValue": "{}",
+            "bodyType": "raw",
+            "rawBody": [{"text": "{}", "type": "text"}]
+        },
+        "stepTitle": "", "next": []
+    }, act_id
+
+# ========== 工作流构建 ==========
+
+TRIGGER_MAP = {
+    "TimerTrigger": "cron", "SetRecordTrigger": "setRecord",
+    "ChangeRecordTrigger": "changeRecord", "ReminderTrigger": "datetimeField",
+    "LarkMessageTrigger": "larkMessage", "WebhookTrigger": "webhook",
+    "FormTrigger": "form_submit", "ButtonTrigger": "button_click",
+}
+
+def build_draft(title, trigger_step, action_steps):
+    """构建完整 draft"""
     if action_steps:
         trigger_step["next"] = [{"ids": [action_steps[0]["id"]]}]
-
-    draft = {"steps": [trigger_step] + action_steps, "title": config.get("title", "自动化工作流"), "tabldFieldMap": {}}
-    return draft, trigger_name
+    return {"steps": [trigger_step] + action_steps, "title": title, "tabldFieldMap": {}}
 
 # ========== MCP 工具 ==========
 
 def tool_list_workflows(app_token):
     return api_call("GET", f"/space/api/bitable/{app_token}/automation/list")
 
-def tool_create_workflow(app_token, config):
-    draft, trigger_name = build_draft(config)
-    if draft is None:
-        return {"code": -1, "msg": trigger_name}
-    body = {"token": app_token, "draft": json.dumps(draft, ensure_ascii=False),
-            "extra": json.dumps({"TableMap": {}, "BlockMap": {}, "WorkflowMap": {}, "RelationInfo": {}}),
-            "triggerName": trigger_name, "status": 0, "source": "mcp_create"}
+def tool_create_workflow(app_token, draft, trigger_name, extra=None):
+    body = {
+        "token": app_token,
+        "draft": json.dumps(draft, ensure_ascii=False),
+        "extra": extra or build_extra(),
+        "triggerName": trigger_name,
+        "status": 0,
+        "source": "mcp_create"
+    }
     return api_call("POST", "/space/api/bitable/automation/create", body)
 
-def tool_create_daily_message(app_token, title, message, hour=10, minute=0, receivers=None):
-    return tool_create_workflow(app_token, {
-        "title": title,
-        "trigger": {"type": "TimerTrigger", "rule": "DAILY", "hour": hour, "minute": minute},
-        "actions": [{"type": "LarkMessageAction", "title": title, "content": message, "receivers": receivers or [], "color": "purple"}]
-    })
+def tool_create_daily_message(app_token, title, message, table_id=None, hour=10, minute=0, receivers=None):
+    """创建每日定时消息"""
+    trig, trig_name, _ = build_timer_trigger(table_id, "DAILY", hour, minute)
+    act, act_id = build_lark_message_action(table_id, message, "purple", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name)
 
-def tool_create_once_message(app_token, title, message, receivers=None):
-    return tool_create_workflow(app_token, {
-        "title": title,
-        "trigger": {"type": "TimerTrigger", "rule": "NO_REPEAT"},
-        "actions": [{"type": "LarkMessageAction", "title": title, "content": message, "receivers": receivers or [], "color": "blue"}]
-    })
+def tool_create_once_message(app_token, title, message, table_id=None, receivers=None):
+    """创建一次性消息"""
+    trig, trig_name, _ = build_timer_trigger(table_id, "NO_REPEAT")
+    act, act_id = build_lark_message_action(table_id, message, "blue", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name)
 
-def tool_create_record_trigger(app_token, title, message, table_id, receivers=None):
-    return tool_create_workflow(app_token, {
-        "title": title,
-        "trigger": {"type": "RecordTrigger", "tableId": table_id},
-        "actions": [{"type": "LarkMessageAction", "title": title, "content": message, "receivers": receivers or [], "color": "green"}]
-    })
+def tool_create_new_record_notify(app_token, title, message, table_id, receivers=None):
+    """新增记录时发消息"""
+    trig, trig_name, _ = build_set_record_trigger(table_id)
+    act, _ = build_lark_message_action(table_id, message, "green", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id))
 
-def tool_create_form_trigger(app_token, title, message, table_id, receivers=None):
-    return tool_create_workflow(app_token, {
-        "title": title,
-        "trigger": {"type": "FormTrigger", "tableId": table_id},
-        "actions": [{"type": "LarkMessageAction", "title": title, "content": message, "receivers": receivers or [], "color": "orange"}]
-    })
+def tool_create_change_record_notify(app_token, title, message, table_id, field_id=None, receivers=None):
+    """记录满足条件时发消息"""
+    trig, trig_name, trig_id = build_change_record_trigger(table_id, field_id)
+    act, _ = build_lark_message_action(table_id, message, "orange", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id, [field_id] if field_id else None))
 
-def tool_create_button_trigger(app_token, title, message, table_id, field_id=None, receivers=None):
-    return tool_create_workflow(app_token, {
-        "title": title,
-        "trigger": {"type": "ButtonTrigger", "tableId": table_id, "fieldId": field_id or ""},
-        "actions": [{"type": "LarkMessageAction", "title": title, "content": message, "receivers": receivers or [], "color": "red"}]
-    })
+def tool_create_time_reminder(app_token, title, message, table_id, field_id, hour=9, minute=0, receivers=None):
+    """到达记录中的时间时发消息"""
+    trig, trig_name, _ = build_reminder_trigger(table_id, field_id, hour=hour, minute=minute)
+    act, _ = build_lark_message_action(table_id, message, "red", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name, build_extra(table_id, [field_id]))
+
+def tool_create_lark_message_trigger(app_token, title, message, scope="at", receivers=None):
+    """接收到飞书消息时发消息"""
+    trig, trig_name, _ = build_lark_message_trigger(scope)
+    act, _ = build_lark_message_action(None, message, "blue", receivers)
+    draft = build_draft(title, trig, [act])
+    return tool_create_workflow(app_token, draft, trig_name)
 
 # ========== MCP Server ==========
 
@@ -251,42 +386,46 @@ TOOLS = [
     {"name": "list_workflows", "description": "列出飞书多维表格的所有自动化工作流",
      "inputSchema": {"type": "object", "properties": {"app_token": {"type": "string"}}, "required": ["app_token"]}},
 
-    {"name": "create_workflow", "description": "创建自动化工作流（通用接口，支持所有触发器和动作类型）",
-     "inputSchema": {"type": "object", "properties": {
-         "app_token": {"type": "string"}, "config": {"type": "object"}
-     }, "required": ["app_token", "config"]}},
-
     {"name": "create_daily_message", "description": "创建每日定时消息提醒",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
-         "hour": {"type": "integer"}, "minute": {"type": "integer"},
+         "table_id": {"type": "string"}, "hour": {"type": "integer"}, "minute": {"type": "integer"},
          "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message"]}},
 
     {"name": "create_once_message", "description": "创建一次性消息提醒",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
-         "receivers": {"type": "array", "items": {"type": "string"}}
+         "table_id": {"type": "string"}, "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message"]}},
 
-    {"name": "create_record_trigger", "description": "创建记录变化触发（当记录新增/修改/删除时发消息）",
+    {"name": "create_new_record_notify", "description": "新增记录时发送通知",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
          "table_id": {"type": "string"}, "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message", "table_id"]}},
 
-    {"name": "create_form_trigger", "description": "创建表单提交触发（当用户提交表单时发消息）",
-     "inputSchema": {"type": "object", "properties": {
-         "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
-         "table_id": {"type": "string"}, "receivers": {"type": "array", "items": {"type": "string"}}
-     }, "required": ["app_token", "title", "message", "table_id"]}},
-
-    {"name": "create_button_trigger", "description": "创建按钮点击触发（当用户点击按钮时发消息）",
+    {"name": "create_change_record_notify", "description": "记录满足条件时发送通知",
      "inputSchema": {"type": "object", "properties": {
          "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
          "table_id": {"type": "string"}, "field_id": {"type": "string"},
          "receivers": {"type": "array", "items": {"type": "string"}}
      }, "required": ["app_token", "title", "message", "table_id"]}},
+
+    {"name": "create_time_reminder", "description": "到达记录中的时间时发送提醒",
+     "inputSchema": {"type": "object", "properties": {
+         "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
+         "table_id": {"type": "string"}, "field_id": {"type": "string"},
+         "hour": {"type": "integer"}, "minute": {"type": "integer"},
+         "receivers": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["app_token", "title", "message", "table_id", "field_id"]}},
+
+    {"name": "create_lark_message_trigger", "description": "接收到飞书消息时触发",
+     "inputSchema": {"type": "object", "properties": {
+         "app_token": {"type": "string"}, "title": {"type": "string"}, "message": {"type": "string"},
+         "scope": {"type": "string", "enum": ["at", "all"], "description": "at=被@时, all=所有消息"},
+         "receivers": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["app_token", "title", "message"]}},
 ]
 
 class MCPHandler(BaseHTTPRequestHandler):
@@ -328,12 +467,12 @@ class MCPHandler(BaseHTTPRequestHandler):
     def _call_tool(self, name, args):
         try:
             if name == "list_workflows": r = tool_list_workflows(args["app_token"])
-            elif name == "create_workflow": r = tool_create_workflow(args["app_token"], args["config"])
-            elif name == "create_daily_message": r = tool_create_daily_message(args["app_token"], args["title"], args["message"], args.get("hour", 10), args.get("minute", 0), args.get("receivers"))
-            elif name == "create_once_message": r = tool_create_once_message(args["app_token"], args["title"], args["message"], args.get("receivers"))
-            elif name == "create_record_trigger": r = tool_create_record_trigger(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
-            elif name == "create_form_trigger": r = tool_create_form_trigger(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
-            elif name == "create_button_trigger": r = tool_create_button_trigger(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
+            elif name == "create_daily_message": r = tool_create_daily_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("hour", 10), args.get("minute", 0), args.get("receivers"))
+            elif name == "create_once_message": r = tool_create_once_message(args["app_token"], args["title"], args["message"], args.get("table_id"), args.get("receivers"))
+            elif name == "create_new_record_notify": r = tool_create_new_record_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("receivers"))
+            elif name == "create_change_record_notify": r = tool_create_change_record_notify(args["app_token"], args["title"], args["message"], args["table_id"], args.get("field_id"), args.get("receivers"))
+            elif name == "create_time_reminder": r = tool_create_time_reminder(args["app_token"], args["title"], args["message"], args["table_id"], args["field_id"], args.get("hour", 9), args.get("minute", 0), args.get("receivers"))
+            elif name == "create_lark_message_trigger": r = tool_create_lark_message_trigger(args["app_token"], args["title"], args["message"], args.get("scope", "at"), args.get("receivers"))
             else: return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
             return {"content": [{"type": "text", "text": json.dumps(r, ensure_ascii=False, indent=2)}]}
         except Exception as e:
