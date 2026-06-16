@@ -2,82 +2,57 @@
 
 通过逆向工程的飞书内部 API，实现多维表格自动化工作流的编程管理。
 
-## 支持的触发器类型
+## 支持的触发器（8种）
 
-| 类型 | 说明 |
-|------|------|
-| TimerTrigger | 定时触发（每日/每周/一次性） |
-| RecordTrigger | 记录变化触发（新增/修改/删除） |
-| FormTrigger | 表单提交触发 |
-| ButtonTrigger | 按钮点击触发 |
+| 触发器 | triggerName | 说明 |
+|--------|-------------|------|
+| TimerTrigger | `cron` | 定时触发（每日/每周/一次性） |
+| SetRecordTrigger | `setRecord` | 新增记录触发 |
+| ChangeRecordTrigger | `changeRecord` | 记录满足条件触发 |
+| ReminderTrigger | `datetimeField` | 到达记录中的时间触发 |
+| LarkMessageTrigger | `larkMessage` | 接收到飞书消息触发 |
+| WebhookTrigger | `webhook` | 接收到webhook触发 |
+| FormTrigger | `form_submit` | 表单提交触发 |
+| ButtonTrigger | `button_click` | 按钮点击触发 |
 
-## 支持的动作类型
+## 支持的动作（10种）
 
-| 类型 | 说明 |
+| 动作 | 说明 |
 |------|------|
 | LarkMessageAction | 发送飞书消息 |
-| BitableAction | 更新记录字段 |
+| AddRecordAction | 新增记录 |
+| SetRecordAction | 修改记录 |
+| FindRecordAction | 查找记录 |
+| GenerateAiTextAction | AI生成文本 |
+| HTTPClientAction | 发送HTTP请求 |
+| BitableAction | 更新字段 |
 | SendEmailAction | 发送邮件 |
-| HttpAction | HTTP 请求 |
-| WebhookAction | Webhook 回调 |
+| WebhookAction | Webhook回调 |
 | ConditionAction | 条件判断 |
-| BitableAutomationAction | 自动化动作 |
 
-## 工具列表
+## 工具列表（10个）
 
 ### list_workflows
-
 列出多维表格的所有自动化工作流。
-
 ```json
 {"app_token": "多维表格token"}
 ```
 
-### create_workflow
-
-通用工作流创建接口（支持所有触发器和动作类型）。
-
-```json
-{
-  "app_token": "多维表格token",
-  "config": {
-    "title": "工作流标题",
-    "trigger": {
-      "type": "TimerTrigger",
-      "rule": "DAILY",
-      "hour": 10,
-      "minute": 0
-    },
-    "actions": [{
-      "type": "LarkMessageAction",
-      "title": "提醒标题",
-      "content": "提醒内容",
-      "receivers": ["ou_xxx"],
-      "color": "purple"
-    }]
-  }
-}
-```
-
 ### create_daily_message
-
-创建每日定时消息提醒（快捷方式）。
-
+创建每日定时消息提醒。
 ```json
 {
   "app_token": "多维表格token",
   "title": "每日提醒",
   "message": "今日待办...",
-  "hour": 10,
-  "minute": 0,
+  "table_id": "tblxxx",
+  "hour": 10, "minute": 0,
   "receivers": ["ou_xxx"]
 }
 ```
 
 ### create_once_message
-
 创建一次性消息提醒。
-
 ```json
 {
   "app_token": "多维表格token",
@@ -87,10 +62,8 @@
 }
 ```
 
-### create_record_trigger
-
-创建记录变化触发消息。
-
+### create_new_record_notify
+新增记录时发送通知。
 ```json
 {
   "app_token": "多维表格token",
@@ -101,10 +74,58 @@
 }
 ```
 
-### create_form_trigger
+### create_change_record_notify
+记录满足条件时发送通知。
+```json
+{
+  "app_token": "多维表格token",
+  "title": "条件触发通知",
+  "message": "记录已满足条件",
+  "table_id": "tblxxx",
+  "field_id": "fldxxx",
+  "receivers": ["ou_xxx"]
+}
+```
 
-创建表单提交触发消息。
+### create_time_reminder
+到达记录中的时间时发送提醒。
+```json
+{
+  "app_token": "多维表格token",
+  "title": "时间提醒",
+  "message": "时间到了",
+  "table_id": "tblxxx",
+  "field_id": "fldxxx",
+  "hour": 9, "minute": 0,
+  "receivers": ["ou_xxx"]
+}
+```
 
+### create_lark_message_trigger
+接收到飞书消息时触发。
+```json
+{
+  "app_token": "多维表格token",
+  "title": "消息触发通知",
+  "message": "收到新消息",
+  "scope": "at",
+  "receivers": ["ou_xxx"]
+}
+```
+
+### create_webhook_notify
+接收到webhook时发送通知。
+```json
+{
+  "app_token": "多维表格token",
+  "title": "Webhook通知",
+  "message": "收到webhook",
+  "receivers": ["ou_xxx"]
+}
+```
+
+### create_form_notify
+表单提交时发送通知。
 ```json
 {
   "app_token": "多维表格token",
@@ -115,10 +136,8 @@
 }
 ```
 
-### create_button_trigger
-
-创建按钮点击触发消息。
-
+### create_button_notify
+按钮点击时发送通知。
 ```json
 {
   "app_token": "多维表格token",
@@ -160,6 +179,18 @@ python3 server.py --port 8067
 
 ## 技术细节
 
+### ref_ 前缀系统
+
+飞书内部 API 使用 `ref_` 前缀引用 table 和 field：
+- 表ID：`ref_` + 真实table_id
+- 字段ID：`ref_` + 真实table_id + `_` + 真实field_id
+
+MCP 会自动处理前缀生成和 `extra.TableMap` 映射。
+
+### ⚠️ 关键发现
+
+**不要传 `flowSchema` 和 `nodeSchema`！** 服务器会根据 draft 自动生成这两个字段。
+
 ### API 端点
 
 | 端点 | 方法 | 说明 |
@@ -167,18 +198,11 @@ python3 server.py --port 8067
 | `/space/api/bitable/automation/create` | POST | 创建工作流 |
 | `/space/api/bitable/{token}/automation/list` | GET | 列出工作流 |
 
-### 认证方式
-
-Cookie 认证（非 App Token），需要用户登录态。
-
-### ⚠️ 关键发现
-
-**不要传 `flowSchema` 和 `nodeSchema`！** 服务器会根据 draft 自动生成这两个字段。如果传了，会导致 cron 验证失败。
-
 ## 版本记录
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | 0.1.0 | 2026-06-16 | 初版，验证 API 可行性 |
 | 0.2.0 | 2026-06-16 | 重构为通用 MCP |
-| 0.3.0 | 2026-06-16 | 支持 4 种触发器 + 7 种动作类型 |
+| 0.3.0 | 2026-06-16 | 支持 TimerTrigger + LarkMessageAction |
+| 0.4.0 | 2026-06-16 | 支持全部 8 种触发器 + 10 种动作 + ref_ 前缀系统 |
