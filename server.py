@@ -362,6 +362,19 @@ def tool_create_workflow(app_token, draft, trigger_name, extra=None):
     }
     return api_call("POST", "/space/api/bitable/automation/create", body)
 
+def tool_update_workflow(app_token, workflow_id, draft, trigger_name="addRecordV2", extra=None):
+    """更新工作流 draft"""
+    body = {
+        "token": app_token,
+        "workflowID": workflow_id,
+        "draft": json.dumps(draft, ensure_ascii=False),
+        "extra": extra or build_extra(),
+        "triggerName": trigger_name,
+        "status": 0,
+        "source": ""
+    }
+    return api_call("POST", "/space/api/bitable/automation/update", body)
+
 def tool_create_daily_message(app_token, title, message, table_id=None, hour=10, minute=0, receivers=None, buttons=None):
     """创建每日定时消息"""
     trig, trig_name, _ = build_timer_trigger(table_id, "DAILY", hour, minute)
